@@ -1,0 +1,157 @@
+library(VIM) # Load VIM package
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+-------------------------------------------------------------------------------------------------------------------
+fifa = read.csv("players_20.csv", encoding = "UTF-8",header = TRUE, sep=",",na.strings=c(''))
+-------------------------------------------------------------------------------------------------------------------
+fifa = fifa %>%
+select(-long_name,-player_url, -dob, -height_cm, -weight_kg, -nationality,
+-(international_reputation:rb))
+summary(fifa)
+-------------------------------------------------------------------------------------------------------------------
+fifa = fifa%>%
+mutate(player_positions=strsplit(as.character(player_positions), ",")) %>%
+unnest(player_positions)
+fifa$player_positions = str_replace_all(fifa$player_positions, fixed(" "), "")
+fifa = fifa %>%
+distinct(sofifa_id, .keep_all = TRUE)
+fifa = fifa %>%
+select(-sofifa_id)
+-------------------------------------------------------------------------------------------------------------------
+Create new variables: leagues, general position 
+bundesliga <- c(
+"1. FC Nürnberg", "1. FSV Mainz 05", "Bayer 04 Leverkusen", "FC Bayern München",
+"Borussia Dortmund", "Borussia Mönchengladbach", "Eintracht Frankfurt",
+"FC Augsburg", "FC Schalke 04", "Fortuna Düsseldorf", "Hannover 96",
+"Hertha BSC", "RB Leipzig", "SC Freiburg", "TSG 1899 Hoffenheim",
+"VfB Stuttgart", "VfL Wolfsburg", "SV Werder Bremen", "1. FC Köln")
+premierLeague <- c(
+"Arsenal", "Bournemouth", "Brighton & Hove Albion", "Burnley",
+"Cardiff City", "Chelsea", "Crystal Palace", "Everton", "Fulham",
+"Huddersfield Town", "Leicester City", "Liverpool", "Manchester City",
+"Manchester United", "Newcastle United", "Southampton",
+"Tottenham Hotspur", "Watford", "West Ham United", "Wolverhampton Wanderers","Aston Villa")
+laliga <- c(
+"Athletic Club de Bilbao", "Atlético Madrid", "CD Leganés", "CA Osasuna",
+"Deportivo Alavés", "FC Barcelona", "Getafe CF", "Girona FC", "Deportivo de La Coruña",
+"Levante UD", "Rayo Vallecano", "RC Celta", "RCD Espanyol",
+"Real Betis", "Real Madrid", "Real Sociedad", "Real Valladolid CF",
+"SD Eibar", "SD Huesca", "Sevilla FC", "Valencia CF", "Villarreal CF", "Real Zaragoza")
+seriea <- c(
+"Atalanta","Bologna","Cagliari","Chievo Verona","Empoli", "Fiorentina","Frosinone","Genoa",
+"Inter","Juventus","Lazio","Milan","Napoli","Parma","Roma","Sampdoria","Sassuolo","SPAL",
+"Torino","Udinese",'Fluminense')
+ligue1 <- c(
+"Amiens SC", "Angers SCO", "AS Monaco", "AS Saint-Étienne", "Dijon FCO", "En Avant de Guingamp",
+"FC Nantes", "FC Girondins de Bordeaux", "LOSC Lille", "Montpellier HSC", "Nîmes Olympique",
+"OGC Nice", "Olympique Lyonnais","Olympique de Marseille", "Paris Saint-Germain", "Granada CF",
+"RC Strasbourg Alsace", "Stade Malherbe Caen", "Stade de Reims", "Stade Rennais FC", "Toulouse Football Club")
+eredivisie <- c(
+"ADO Den Haag","Ajax", "AZ Alkmaar", "De Graafschap","Excelsior","FC Emmen","FC Groningen",
+"FC Utrecht", "Feyenoord","Fortuna Sittard", "Heracles Almelo","NAC Breda",
+"PEC Zwolle", "PSV","SC Heerenveen","Vitesse","VVV-Venlo","Willem II")
+fifa = fifa %>%
+mutate(
+League = case_when(
+club %in% bundesliga ~ "Bundesliga",
+club %in% premierLeague ~ "Premier League",
+club %in% laliga ~ "La Liga",
+club %in% seriea ~ "Serie A",
+club %in% ligue1 ~ "Ligue 1",
+club %in% eredivisie ~ "Eredivisie"))
+forwarder = c("ST", "LW", "RW", "LF", "RF", "RS","LS", "CF")
+midfielder = c("CM","RCM","LCM", "CDM","RDM","LDM", "CAM", "LAM", "RAM", "RM", "LM")
+GK = c("GK")
+defender = c("LCB", "RCB", "LB", "SUB", "RB", "CB", "LWB", "RWB")
+fifa = fifa %>%
+mutate(Position_Area = case_when(
+player_positions %in% forwarder ~ "Forwarder",
+player_positions %in% midfielder ~ "Midfielder",
+player_positions %in% GK ~ "Goal Keeper",
+player_positions %in% defender ~ "Defender"))
+-------------------------------------------------------------------------------------------------------------------
+fifa = fifa %>%
+filter(!is.na(League))
+-------------------------------------------------------------------------------------------------------------------
+fifa$value_eur[fifa$value_eur == 0] = NA
+fifa = kNN(fifa, variable = 'value_eur')
+fifa = kNN(fifa, variable = 'wage_eur')
+-------------------------------------------------------------------------------------------------------------------
+fifa$Position_Area = as.factor(fifa$Position_Area)
+fifa$League = as.factor(fifa$League)
+fifa = fifa %>%
+filter(!is.na(player_positions)) %>%
+filter(Position_Area != 'Goal Keeper')
+-------------------------------------------------------------------------------------------------------------------
+Player Distribution
+fifa %>%
+group_by(League, preferred_foot) %>%
+summarise(Player_Count = n_distinct(short_name)) %>%
+ggplot(aes(League,Player_Count,fill=Player_Count)) +
+geom_bar(stat="identity", width = 0.5)+
+facet_wrap(~preferred_foot)+
+geom_text(aes(label=Player_Count), vjust=0) +
+scale_fill_gradient(low = "green", high = "red")+
+labs(x="League",
+y="Count",
+title="Distribution of The Players")+
+theme_bw()+
+theme(plot.title = element_text(size=22),axis.text.x= element_text(size=12,angle=60),
+axis.text.y= element_text(size=15), axis.title=element_text(size=18))
+-------------------------------------------------------------------------------------------------------------------
+Player_percentage = fifa %>% group_by(League, Position_Area, preferred_foot) %>% summarise(Count=n()) %>%
+mutate(percent=round(prop.table(Count),2) * 100) %>%
+ggplot(aes(x=League, y=percent)) + geom_bar(stat="identity", fill = "dodgerblue", color="grey40") +
+geom_text(aes(x=League, y=0.01, label= sprintf("%.2f%%", percent)),
+hjust=-0.8, vjust=-1, size=4,
+colour="black", fontface="bold") +
+coord_flip() +
+facet_wrap(Position_Area~preferred_foot)+theme_bw() + labs(x="Player Distribution", y="Percentage") +
+labs(title="Player Distribution (%)") + theme(plot.title=element_text(hjust=0.5))+
+theme(plot.title = element_text(size=22),axis.text.x= element_text(size=12,angle=60),
+axis.text.y= element_text(size=15), axis.title=element_text(size=18))
+-------------------------------------------------------------------------------------------------------------------
+ggplot(fifa, aes(Position_Area, value_eur))+
+geom_boxplot(aes(fill = preferred_foot)) +
+scale_y_continuous(labels = c("0 €", " 50 Million €", "100 Million €","150 Million €", "200 Million €"))+
+theme_bw()+
+facet_wrap(~League)+
+theme(plot.title = element_text(size=22),axis.text.x= element_text(size=10,angle=60),
+axis.text.y= element_text(size=10), axis.title=element_text(size=12))
+------------------------------------------------------------------------------------------------------------------
+ggplot(fifa, aes(Position_Area, wage_eur))+
+geom_boxplot(aes(fill = preferred_foot)) +
+scale_y_continuous(labels = c("0 €", " 250.000 €", "500.000 €","750.000 €", "1 Million €"),
+breaks = c(0, 250000, 500000, 750000, 1000000))+
+facet_wrap(~League)+
+theme_bw()+
+theme(plot.title = element_text(size=22),axis.text.x= element_text(size=10,angle=60),
+axis.text.y= element_text(size=10), axis.title=element_text(size=12))
+------------------------------------------------------------------------------------------------------------------
+#Density - Area / age and overall rating
+ggplot(fifa, aes(x=age, y=overall) ) +
+stat_density_2d(aes(fill = ..level..), geom = "polygon", colour="white")+
+scale_fill_viridis_c() +
+facet_wrap(~preferred_foot)
+theme_bw()+
+labs(x="Age",
+y="Overall")+
+theme(plot.title = element_text(size=22)
+,axis.text.x= element_text(size=15),
+axis.text.y= element_text(size=15),
+axis.title=element_text(size=18))
+------------------------------------------------------------------------------------------------------------------
+#age-wage
+Wage_aged = fifa%>%
+group_by(age, preferred_foot ) %>%
+summarize(avg.wage=mean(wage_eur))
+ggplot(Wage_aged, aes(x=age, y=avg.wage)) +
+geom_line(aes(group=preferred_foot),color="#58ACFA", linetype="dashed") +
+geom_point(aes(color=preferred_foot), size=3) +
+theme(plot.title=element_text(hjust=0.5),
+axis.text.x=element_text(angle=45)) +
+labs(title="Salary Age Relation ", y="Average Salary", x="Age") +
+scale_y_continuous(labels = c("0 €", " 15.000 €", "30.000 €","45.000 €", "60.000 €","75.000 €"),
+breaks = c(0,15000, 30000, 45000, 60000, 75000))
